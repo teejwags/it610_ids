@@ -1,5 +1,6 @@
 #Some code adapted from www.binarytides.com/code-a-packet-sniffer-in-python-with-pcapy-extension
 #Some code adapted from www.w3schools.com/python
+#Some code adapted from www.realpython.com/python-send-email/
 import socket
 from struct import *
 import datetime
@@ -7,15 +8,22 @@ import pcapy
 import netifaces
 import mysql.connector
 import datetime
+import smtplib
+import ssl
+import getpass
 
 def main():
+    emailacct = input("Please enter the email account for email notifications: ")
+    password = getpass.getpass("Please enter email password for email notifications: ")
+    if(emailacct == "" or password == ""):
+        sys.exit("Email credentials not provided. Exiting program.")
     print("Monitoring on interface enp0s3")
     cap = pcapy.open_live("enp0s3",65536,1,0)
     while True:
         (header, packet) = cap.next()
         parsed = parse_packet(packet)
         if('srcIP' in parsed and parsed['srcIP'] != netifaces.ifaddresses('enp0s3')[netifaces.AF_INET][0]['addr']):
-            db_action(parsed)
+            db_action(parsed, emailacct, password)
 
 def eth_addr(a):
     b = a.hex()
@@ -98,10 +106,11 @@ def parse_packet(packet):
             print('Protocol other than TCP, UDP, or ICMP and cannot be processed.')
     return returninfo
 
-def db_action(data):
+def db_action(data,givenemail,givenpass): 
     try:
         sentlog = False
-        idsdb = mysql.connector.connect(host='localhost',user='ids',passwd=<password>,database='ids_log')
+        reason = "" 
+        idsdb = mysql.connector.connect(host='localhost',user=<username>,passwd=<password>,database='ids_log')
         idscursor = idsdb.cursor(prepared=True)
         sql = """SELECT * FROM ids_records WHERE source_ip=%s"""
         params = (data.get('srcIP'),)
@@ -118,7 +127,9 @@ def db_action(data):
         for row in smr:
             samemac += 1
         if(sameip == 0 or samemac == 0):
-            log_info(data, "New Source Host [")
+            reason = "New Source Host"
+            log_info(data,reason) 
+            send_email(givenemail,givenpass,reason,data.get('srcIP'),data.get('srcMAC'),data.get('srcPort'),data.get('destPort'))
             sentlog = True
         sql = """SELECT * FROM ids_records WHERE source_ip=%s AND source_mac=%s AND payload LIKE %s"""
         compstring = data['payload'][:8] +'%' +data['payload'][-8:]
@@ -129,7 +140,9 @@ def db_action(data):
         for row in spr:
             samepackets += 1
         if(samepackets == 0 and sentlog == False):
-            log_info(data, "Atypical Data Received [ ")
+            reason = "Atypical Data Received"
+            log_info(data,reason) 
+            send_email(givenemail,givenpass,reason,data.get('srcIP'),data.get('srcMAC'),data.get('srcPort'),data.get('destPort'))
         sql = """INSERT INTO ids_records (timestamp, source_mac, source_ip, source_port, dest_port, payload) VALUES (%s, %s, %s, %s, %s, %s)"""
         params = (data.get('timestamp'),data.get('srcMAC'),data.get('srcIP'),data.get('srcPort'),data.get('destPort'),data.get('payload'),)
         idscursor.execute(sql, params)
@@ -142,18 +155,41 @@ def db_action(data):
             idscursor.close()
     
 def log_info(data, cause):
-    logfile = open("log_ids.log","a")
+    logfile = open("ids.log","a")
     logfile.write('(')
     logfile.write(data['timestamp'])
     logfile.write(') WARNING: ')
     logfile.write(cause)
-    logfile.write('Source IP: ')
+    logfile.write(' [Source IP: ')
     logfile.write(data['srcIP'])
     logfile.write(' Source MAC: ')
     logfile.write(data['srcMAC'])
     logfile.write('] [see database record for additional details.]\n')
     logfile.close()
     print("Potentially suspicious network activity detected. Check log for details (PATH: ./log_ids.log).")
+
+def send_email(givenemail,givenpass,reason,sip,smac,sport,dport):
+    port = 465
+    smtp_server = "smtp.gmail.com"
+    sender_email = givenemail 
+    rcvr_email = givenemail 
+    password = givenpass 
+    message = """/
+    Subject: Potentially Suspicious Network Activity
+
+    Potentially suspicious network activity received. Please review.
+
+    """+reason+"""\n
+    Destination Port: """+(str)(dport)+"""
+    Source IP: """+(str)(sip)+"""
+    Source Port: """+(str)(sport)+"""
+    Source MAC: """+(str)(smac)+"""\n
+    Check logs and database records for details."""
+    context = ssl.create_default_context()
+    with smtplib.SMTP_SSL(smtp_server,port, context=context) as server:
+        server.login(sender_email,password)
+        server.sendmail(sender_email,rcvr_email,message)
+    print("Email notification sent. Please check your email.")
 
 if(__name__ =="__main__"):
     main()
