@@ -36,7 +36,12 @@ def eth_addr(a):
 
 def parse_packet(packet):
     now = datetime.datetime.now()
-    returninfo={'timestamp':now.replace(hour=now.hour-5).strftime("%Y/%m/%d %H:%M:%S.%f")}
+    if(now.hour>=5):
+        now.replace(hour=now.hour-5)
+    else:
+        now.replace(day=now.day-1)
+        now.replace(hour=now.hour+19)
+    returninfo={'timestamp':now.strftime("%Y/%m/%d %H:%M:%S.%f")}
     eth_length = 14
     eth_header = packet[:eth_length]
     eth = unpack('!6s6sH',eth_header)
@@ -110,7 +115,7 @@ def db_action(data,givenemail,givenpass):
     try:
         sentlog = False
         reason = "" 
-        idsdb = mysql.connector.connect(host='localhost',user=<username>,passwd=<password>,database='ids_log')
+        idsdb = mysql.connector.connect(host='localhost',user='ids',passwd=<password>,database='ids_log')
         idscursor = idsdb.cursor(prepared=True)
         sql = """SELECT * FROM ids_records WHERE source_ip=%s"""
         params = (data.get('srcIP'),)
